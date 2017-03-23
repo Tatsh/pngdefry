@@ -34,6 +34,7 @@ int flag_Process_Anyway = 0;
 int flag_List_Chunks = 0;
 int flag_Debug = 0;
 int flag_UpdateAlpha = 1;
+int flag_Ignore_CRC32 = 0;
 int repack_IDAT_size = 524288;	/* 512K -- seems a bit much to me, axually, but have seen this used */
 
 int flag_Rewrite = 0;
@@ -553,8 +554,13 @@ int process (char *filename)
 			}
 			printf ("    chunk : %c%c%c%c  length %6u  CRC32 %08X", (pngChunks[i].id >> 24) & 0xff,(pngChunks[i].id >> 16) & 0xff, (pngChunks[i].id >> 8) & 0xff,pngChunks[i].id & 0xff, pngChunks[i].length, pngChunks[i].crc32);
 			crc = crc32s (pngChunks[i].data, pngChunks[i].length+4);
-			if (pngChunks[i].crc32 != crc)
+			if (pngChunks[i].crc32 != crc) {
 				printf (" --> CRC32 check invalid! Should be %08X", crc);
+				if (!flag_Ignore_CRC32) {
+					printf("\n");
+					return 0;
+				}
+			}
 			printf ("\n");
 		}
 	} else
@@ -570,6 +576,9 @@ int process (char *filename)
 					printf ("%s :\n", filename);
 				}
 				printf ("    chunk : %c%c%c%c  length %6u  CRC32 %08X", (pngChunks[i].id >> 24) & 0xff,(pngChunks[i].id >> 16) & 0xff, (pngChunks[i].id >> 8) & 0xff,pngChunks[i].id & 0xff, pngChunks[i].length, pngChunks[i].crc32);
+				if (!flag_Ignore_CRC32) {
+					return 0;
+				}
 				printf (" -> invalid, changed to %08X\n", crc);
 				pngChunks[i].crc32 = crc;
 			}
@@ -1346,6 +1355,7 @@ int main (int argc, char **argv)
 		printf ("  -v         verbose processing\n");
 		printf ("  -i(value)  max IDAT chunk size in bytes (minimum: 1024; default: %u)\n", repack_IDAT_size);
 		printf ("  -p         process all files, not just -iphone ones (for debugging purposed only)\n");
+		printf ("  -C         continue processing even if CRC32 check fails\n");
 		printf ("  -d         very verbose processing (for debugging purposes only)\n");
 		return 0;
 	}
@@ -1365,6 +1375,7 @@ int main (int argc, char **argv)
 			case 'l': flag_List_Chunks = 1; break;
 			case 'p': flag_Process_Anyway = 1; break;
 			case 'v': flag_Verbose = 1; break;
+			case 'C': flag_Ignore_CRC32 = 1; break;
 			case 's':
 				if (argv[i][2])
 				{
