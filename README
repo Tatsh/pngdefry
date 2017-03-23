@@ -1,65 +1,53 @@
-pngdefry(1)                       2012-01-22                       pngdefry(1)
+pngdefry(1)								2012-01-22							      pngdefry(1)
 
+NAME
+       pngdefry - Removes -iphone optimization and reorders RGB(A) pixels for PNG images
 
+SYNOPSIS
+	 pngdefry [-soaplvid] file.png [file.png [...]]
 
-[1mNAME[0m
-       pngdefry - Removes -iphone optimization and reorders RGB(A) pixels for
-       PNG images
+OPTIONS
+       -s(suffix)
+	   Appends suffix to output file name.
 
-[1mSYNOPSIS[0m
-         pngdefry [-soaplvid] file.png [file.png [...]]
+       -o(path)
+	   Writes output file(s) to path.  Note: without -s or -o, NO output will be created.
 
-[1mOPTIONS[0m
-       [1m-s(suffix)[0m
-           Appends suffix to output file name.
+       -a  Do NOT de-multiply alpha.
 
-       [1m-o(path)[0m
-           Writes output file(s) to path.  Note: without -s or -o, NO output
-           will be created.
+       -l  Lists all chunks.
 
-       [1m-a  [22mDo NOT de-multiply alpha.
+       -v  Verbose processing.
 
-       [1m-l  [22mLists all chunks.
+       -i(value)
+	   Max IDAT chunk size in bytes (minimum: 1024; default: 524288).
 
-       [1m-v  [22mVerbose processing.
+       -p  Processes all files, not just -iphone ones (for debugging purposed only).
 
-       [1m-i(value)[0m
-           Max IDAT chunk size in bytes (minimum: 1024; default: 524288).
+       -d  Very verbose processing (for debugging purposes only).
 
-       [1m-p  [22mProcesses all files, not just -iphone ones (for debugging purposed
-           only).
+       -C  Ignore invalid checksums on chunks (not recommended)
 
-       [1m-d  [22mVery verbose processing (for debugging purposes only).
+DESCRIPTION
+       pngdefry attempts to remove -iphone optimization from PNG files that are processed with Apple's modified pngcrush.
 
-
-
-
-[1mDESCRIPTION[0m
-       pngdefry attempts to remove -iphone optimization from PNG files that
-       are processed with Apple's modified pngcrush.
-
-       It removes the private critical data chunk "CgBI" if this is at the
-       very start of the PNG file, unpacks IDAT chunks, reverses BGR(A) pixel
-       order to RGB(A), undoes pre-multiplied alpha, repacks IDAT chunks, and
-       outputs all to a new file.  This is a command-line program with batch
+       It removes the private critical data chunk "CgBI" if this is at the very start of the PNG file, unpacks IDAT chunks, reverses BGR(A) pixel order
+       to RGB(A), undoes pre-multiplied alpha, repacks IDAT chunks, and outputs all to a new file.  This is a command-line program with batch
        capabilities (e.g., pngdefry *.png).
 
-[1mENVIRONMENT[0m
+ENVIRONMENT
        None.
 
-[1mFILES[0m
+FILES
        None.
 
-[1mSEE ALSO[0m
-       [4mpngcheck[24m(1) [4mpngcrush[24m(1)
+SEE ALSO
+       pngcheck(1) pngcrush(1)
 
-[1mAUTHORS[0m
+AUTHORS
        Program was written by Jongware <jongware@hotmail.com>.
 
-       This manual page was written by Jongware for Mac OS X 10.7.2 (but may
-       be used by others). Released as "un-licensed" public domain software.
-       For more information, please refer to <http://unlicense.org/>
+       This manual page was written by Jongware for Mac OS X 10.7.2 (but may be used by others). Released as "un-licensed" public domain software. For
+       more information, please refer to <http://unlicense.org/>
 
-
-
-pngdefry                          2012-01-22                       pngdefry(1)
+pngdefry								2012-01-22							      pngdefry(1)
