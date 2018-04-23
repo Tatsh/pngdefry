@@ -1,4 +1,4 @@
-/* pngdefry.c v1.1 - public domain PNG reading/writing/modification, PNG writing
+/* pngdefry.c v1.2 - public domain PNG reading/writing/modification, PNG writing
    See "unlicense" statement at the end of this file.
 
 	[Jongware], 21-Jan-2012
@@ -11,6 +11,22 @@
 	This program uses miniz.c (http://code.google.com/p/miniz/) by Rich Geldreich
 	(Rich Geldreich <richgel99@gmail.com>, last updated May 27, 2011)
 	Version used is included in the original file package.
+
+	Changes 31-Mar-2017
+	===================
+	bytespline = (imgwidth*bitspp+7)/8 may silently overflow if reported image width * bitspp
+	is larger than UINT_MAX. Previous maximum check was for a max width of 0x7FFFFFFF; this has
+	been decreased to 0x3FFFFFF.
+
+	When 0 bytes are read in init_chunk, it assumes the end of the file is reached and returns "as
+	usual". However, there must always be at least one chunk present. An additional check is added
+	to not fail on malformed files that do not start with at least one chunk.
+
+	A vulnerability was reported where a tampered-with file would still be processed as usual.
+	This was missed because a bad CRC32 check is reported but then (possibly silently) corrected.
+	Fix, as proposed by Tatsh (https://github.com/Tatsh/pngdefry):
+	* by default, refuse to process files with a failing CRC32 check
+	* allow processing damaged files with a new flag: -C
 
 	No-License Agreement
 	====================
@@ -34,7 +50,12 @@ int flag_Process_Anyway = 0;
 int flag_List_Chunks = 0;
 int flag_Debug = 0;
 int flag_UpdateAlpha = 1;
+
+/* do not ignore bad CRC32, as proposed by Tatsh (https://github.com/Tatsh/pngdefry) */
+/* ignoring a bad CRC32 is considered a possible vulnerability */
+/* the flag is set by default to NOT ignore a CRC32 check */
 int flag_Ignore_CRC32 = 0;
+
 int repack_IDAT_size = 524288;	/* 512K -- seems a bit much to me, axually, but have seen this used */
 
 int flag_Rewrite = 0;
@@ -111,10 +132,13 @@ int init_chunk (FILE *f, unsigned int filelength)
 {
 	struct chunk_t one_chunk;
 	unsigned char buf[8];
+	long bytes_read;
 
-	if (fread (buf, 1,4, f) != 4)
+	bytes_read = fread (buf, 1,4, f);
+	if (bytes_read != 4)
 	{
-		if (feof(f))
+		/* only at the end of a file there may be 0 bytes left */
+		if (bytes_read == 0 && num_chunks)
 			return 0;
 		if (flag_Debug)
 			printf ("    informational : failed to read chunk length\n");
@@ -122,7 +146,7 @@ int init_chunk (FILE *f, unsigned int filelength)
 	}
 
 	one_chunk.length = (buf[0] << 24) + (buf[1] << 16) + (buf[2] << 8) + buf[3];
-
+	
 	if (one_chunk.length > filelength-4)
 	{
 		if (flag_Debug)
@@ -149,17 +173,14 @@ int init_chunk (FILE *f, unsigned int filelength)
 	{
 		if (flag_Debug)
 			printf ("    informational : failed to read chunk crc32\n");
-		return -3;
+		return -4;
 	}
 	one_chunk.crc32 = (buf[0] << 24) + (buf[1] << 16) + (buf[2] << 8) + buf[3];
 
 	if (num_chunks >= max_chunks)
 	{
 		max_chunks += 8;
-		if (pngChunks == NULL)
-			pngChunks = (struct chunk_t *)malloc (max_chunks * sizeof(struct chunk_t));
-		else
-			pngChunks = (struct chunk_t *)realloc (pngChunks, max_chunks * sizeof(struct chunk_t));
+		pngChunks = (struct chunk_t *)realloc (pngChunks, max_chunks * sizeof(struct chunk_t));
 	}
 	pngChunks[num_chunks].id = one_chunk.id;
 	pngChunks[num_chunks].length = one_chunk.length;
@@ -451,7 +472,14 @@ int process (char *filename)
 
 	i = 0;
 
-	fread (buf,1,8, f); i += 8;
+	if (fread (buf,1,8, f) != 8)
+	{
+		printf ("%s : not a PNG file\n", filename);
+		fclose (f);
+		return 0;
+	}
+
+	i += 8;
 	if (memcmp (buf, png_magic_bytes, 8))
 	{
 		printf ("%s : not a PNG file\n", filename);
@@ -467,6 +495,7 @@ int process (char *filename)
 			case -1: printf ("%s : invalid chunk size\n", filename); break;
 			case -2: printf ("%s : out of memory\n", filename); break;
 			case -3: printf ("%s : premature end of file\n", filename); break;
+			case -4: printf ("%s : invalid CRC\n", filename); break;
 		}
 		reset_chunks ();
 		return 0;
@@ -505,6 +534,7 @@ int process (char *filename)
 				case -1: printf ("invalid chunk size\n"); break;
 				case -2: printf ("out of memory\n"); break;
 				case -3: printf ("premature end of file\n"); break;
+				case -4: printf ("invalid CRC\n"); break;
 				default: printf ("error code %d\n", result);
 			}
 			reset_chunks ();
@@ -554,13 +584,15 @@ int process (char *filename)
 			}
 			printf ("    chunk : %c%c%c%c  length %6u  CRC32 %08X", (pngChunks[i].id >> 24) & 0xff,(pngChunks[i].id >> 16) & 0xff, (pngChunks[i].id >> 8) & 0xff,pngChunks[i].id & 0xff, pngChunks[i].length, pngChunks[i].crc32);
 			crc = crc32s (pngChunks[i].data, pngChunks[i].length+4);
-			if (pngChunks[i].crc32 != crc) {
+			if (pngChunks[i].crc32 != crc)
+			{
 				printf (" --> CRC32 check invalid! Should be %08X", crc);
-				if (!flag_Ignore_CRC32) {
-					printf("\n");
+				if (!flag_Ignore_CRC32)
+				{
+					printf ("\n");
 					return 0;
 				}
-			}
+			}	
 			printf ("\n");
 		}
 	} else
@@ -576,7 +608,9 @@ int process (char *filename)
 					printf ("%s :\n", filename);
 				}
 				printf ("    chunk : %c%c%c%c  length %6u  CRC32 %08X", (pngChunks[i].id >> 24) & 0xff,(pngChunks[i].id >> 16) & 0xff, (pngChunks[i].id >> 8) & 0xff,pngChunks[i].id & 0xff, pngChunks[i].length, pngChunks[i].crc32);
-				if (!flag_Ignore_CRC32) {
+				if (!flag_Ignore_CRC32)
+				{
+					printf (" -> invalid\n");
 					return 0;
 				}
 				printf (" -> invalid, changed to %08X\n", crc);
@@ -629,7 +663,7 @@ int process (char *filename)
 	filter = ihdr_chunk->data[15];
 	interlace = ihdr_chunk->data[16];
 
-	if (imgwidth == 0 || imgheight == 0 || imgwidth > 2147483647 || imgheight > 2147483647)
+	if (imgwidth == 0 || imgheight == 0 || imgwidth > 67108863 || imgheight > 2147483647)
 	{
 		if (didShowName)
 			printf ("    ");
@@ -687,15 +721,15 @@ int process (char *filename)
    Type    Bit Depths
    ------  ----------  ----------------------------------
    0       1,2,4,8,16  Each pixel is a grayscale sample.
-
+   
    2       8,16        Each pixel is an R,G,B triple.
-
+   
    3       1,2,4,8     Each pixel is a palette index;
                        a PLTE chunk must appear.
-
+   
    4       8,16        Each pixel is a grayscale sample,
                        followed by an alpha sample.
-
+   
    6       8,16        Each pixel is an R,G,B triple,
                        followed by an alpha sample.
 ***/
@@ -766,6 +800,22 @@ int process (char *filename)
 	}
 
 	bytespline = (imgwidth*bitspp+7)/8;
+
+	/* address possible overflow because of malformed imgwidth or bitspp */
+	if (bytespline < imgwidth)
+	{
+		if (didShowName)
+			printf ("    ");
+		else
+		{
+			didShowName = 1;
+			printf ("%s : ", filename);
+		}
+		printf ("image dimensions invalid\n");
+		reset_chunks ();
+		return 0;
+	}
+
  /*	Warning!
  	This value is only valid for 8/16 bit images! */
 	bytespp = (bitspp+7)/8;
@@ -785,7 +835,7 @@ int process (char *filename)
 		printf ("    filter             : %u\n", filter);
 		printf ("    interlace          : %u\n", interlace);
 		printf ("    bits per pixel     : %d\n", bitspp);
-		printf ("    bytes per line     : %d\n", bytespline);
+		printf ("    bytes per line     : %u\n", bytespline);
 	}
 
 	row_filter_bytes = imgheight;
@@ -915,7 +965,7 @@ int process (char *filename)
 			total_idat_size += pngChunks[i].length;
 			i++;
 		}
-
+	
 	/*** So far everything appears to check out. Let's try uncompressing the IDAT chunks. ***/
 		data_out = (unsigned char *)malloc (bytespline * imgheight + row_filter_bytes);
 		if (data_out == NULL)
@@ -940,7 +990,7 @@ int process (char *filename)
 
 		free (all_idat);
 		all_idat = NULL;
-
+	
 		if (out_length <= 0)
 		{
 			free (data_out);
@@ -955,7 +1005,7 @@ int process (char *filename)
 			reset_chunks ();
 			return 0;
 		}
-
+	
 		if (out_length != imgheight*bytespline + row_filter_bytes)
 		{
 			if (didShowName)
@@ -1097,7 +1147,7 @@ int process (char *filename)
 			}
 		}
 
-	/*	Force VERY conservative repacking size ... */
+	/*	Force VERY conservative repacking size ... */		
 		repack_size = 2*(bytespline * imgheight + row_filter_bytes);
 		data_repack = (unsigned char *)malloc (repack_size);
 		if (data_repack == NULL)
@@ -1197,13 +1247,13 @@ int process (char *filename)
 				strcat (write_file_name, suffix);
 			strcat (write_file_name, ".png");
 		}
-
+	
 		if (!didShowName)
 		{
 			printf ("%s : ", filename);
 		}
 		printf ("writing to file %s\n", write_file_name);
-
+	
 		write_file = fopen (write_file_name, "wb");
 		if (!write_file)
 		{
@@ -1211,9 +1261,9 @@ int process (char *filename)
 			reset_chunks ();
 			return 0;
 		}
-
+	
 		fwrite (png_magic_bytes, 1, 8, write_file);
-
+	
 		i = 0;
 		/* need to skip first bogus chunk */
 		/* at this point, I expect the first one to be IHDR! */
@@ -1271,7 +1321,7 @@ int process (char *filename)
 					write_block_size = repack_length;
 				}
 			}
-
+		
 			/* skip original IDAT chunks */
 			while (i < num_chunks && pngChunks[i].id == 0x49444154)	/* "IDAT" */
 				i++;
@@ -1295,7 +1345,7 @@ int process (char *filename)
 				i++;
 			}
 		}
-
+	
 		/* output remaining chunks */
 		while (i < num_chunks)
 		{
@@ -1336,16 +1386,15 @@ int main (int argc, char **argv)
 	int i, nomoreoptions;
 	int seenFiles = 0, processedFiles = 0;
 
-	if (argc == 1 || !strncmp(argv[1], "-h", 2) || !strncmp(argv[1], "--help", 6))
+	if (argc == 1)
 	{
-		printf ("PNGdefry version 1.1 by [Jongware], 21-Jan-2012\n");
+		printf ("PNGdefry version 1.2 by [Jongware], 31-May-2017\n");
 		printf ("\n");
 		printf ("Removes -iphone specific data chunk, reverses colors from BGRA to RGBA, and de-multiplies alpha\n");
 		printf ("\n");
 		printf ("usage: pngdefry [-soaplvid] file.png [...]\n");
 		printf ("\n");
 		printf ("Options:\n");
-        printf ("  -h         show this help\n");
 		printf ("  -          use this if your first input file starts with an '-'\n");
 		printf ("  -s(suffix) append suffix to output file name\n");
 		printf ("  -o(path)   write output file(s) to path\n");
@@ -1355,8 +1404,8 @@ int main (int argc, char **argv)
 		printf ("  -v         verbose processing\n");
 		printf ("  -i(value)  max IDAT chunk size in bytes (minimum: 1024; default: %u)\n", repack_IDAT_size);
 		printf ("  -p         process all files, not just -iphone ones (for debugging purposed only)\n");
-		printf ("  -C         continue processing even if CRC32 check fails\n");
 		printf ("  -d         very verbose processing (for debugging purposes only)\n");
+		printf ("  -C         ignore bad CRC32 (recommended: do NOT use this, as a bad CRC32 may indicate a deliberately damaged file)\n");
 		return 0;
 	}
 
